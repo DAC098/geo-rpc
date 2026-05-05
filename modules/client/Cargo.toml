@@ -1,0 +1,14 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+com.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+tarpc.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true

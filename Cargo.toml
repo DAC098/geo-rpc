@@ -1,0 +1,16 @@
+[workspace]
+members = ["modules/com", "modules/client", "modules/server"]
+resolver = "3"
+
+[workspace.dependencies]
+com = { path = "./modules/com" }
+
+anyhow = { version = "1.0" }
+clap = { version = "4.6", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tarpc = { version = "0.37", features = ["tcp", "serde-transport-json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+futures = { version = "0.3" }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
