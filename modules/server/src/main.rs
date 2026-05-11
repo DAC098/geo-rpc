@@ -184,8 +184,7 @@ fn get_tmp_file() -> anyhow::Result<PathBuf> {
     }
 }
 
-async fn run_start(exec: &config::ExecConfig) -> Result<(), StartError>
-{
+async fn run_start(exec: &config::ExecConfig) -> Result<(), StartError> {
     tracing::info!("starting background-builder");
 
     let status = spawn_background_builder(&exec.background, &exec.cameras)
@@ -211,10 +210,7 @@ async fn run_start(exec: &config::ExecConfig) -> Result<(), StartError>
     Ok(())
 }
 
-fn spawn_background_builder<P>(
-    cmd: &str,
-    cameras_path: P,
-) -> anyhow::Result<tokio::process::Child>
+fn spawn_background_builder<P>(cmd: &str, cameras_path: P) -> anyhow::Result<tokio::process::Child>
 where
     P: AsRef<OsStr>,
 {
@@ -238,12 +234,7 @@ where
 
     tracing::info!("starting stl-render");
 
-    let stl_render = spawn_stl_render(
-        &exec.stl_render,
-        &exec.cameras,
-        path_ref,
-        layer_opts
-    )
+    let stl_render = spawn_stl_render(&exec.stl_render, &exec.cameras, path_ref, layer_opts)
         .map_err(|err| {
             tracing::error!("failed spawning stl-render: {err:#?}");
 
@@ -263,7 +254,9 @@ where
 
         match (stdout, stderr) {
             (Ok(valid_out), Ok(valid_err)) => {
-                tracing::error!("stl-render returned non-zero status code\n{valid_out}\n{valid_err}");
+                tracing::error!(
+                    "stl-render returned non-zero status code\n{valid_out}\n{valid_err}"
+                );
             }
             _ => {
                 tracing::error!("stl-render returned non-zero status code");
@@ -302,9 +295,11 @@ where
 
     match (validator.status.code(), stdout, stderr) {
         (Some(code), Ok(valid_out), Ok(valid_err)) => {
-            tracing::error!("validator returned non-zero status code {code}\n{valid_out}\n{valid_err}");
+            tracing::error!(
+                "validator returned non-zero status code {code}\n{valid_out}\n{valid_err}"
+            );
         }
-        (Some(code), _, _)  => tracing::error!("validator returned non-zero status code {code}"),
+        (Some(code), _, _) => tracing::error!("validator returned non-zero status code {code}"),
         _ => tracing::error!("validator returned unsuccessful"),
     }
 
@@ -377,5 +372,4 @@ where
     }
 }
 
-async fn run_finish() {
-}
+async fn run_finish() {}

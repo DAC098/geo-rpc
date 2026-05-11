@@ -2,16 +2,13 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     str::FromStr,
-    time::{Instant, Duration},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use com::{AddrArgs, CheckError, CheckOpts, DEFAULT_PORT, LayerOpts, RpcClient, StartError};
-use futures::{
-    FutureExt, StreamExt,
-    stream::FuturesUnordered,
-};
+use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 #[derive(Debug, Parser)]
@@ -79,7 +76,7 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
                 println!("{} server status: {status}", client.addr);
             }
         }
-        Cmd::Start { } => {
+        Cmd::Start {} => {
             let start = Instant::now();
             let mut futs = FuturesUnordered::new();
 
@@ -89,7 +86,12 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
 
                 tracing::trace!("sending request to {}", client.addr);
 
-                futs.push(client.channel.print_start(client_context).map(|res| (client.addr, res)));
+                futs.push(
+                    client
+                        .channel
+                        .print_start(client_context)
+                        .map(|res| (client.addr, res)),
+                );
             }
 
             while let Some((addr, res)) = futs.next().await {
@@ -101,7 +103,7 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
                     Ok(status) => match status {
                         Ok(()) => {
                             println!("{addr} finished");
-                        },
+                        }
                         Err(err) => match err {
                             StartError::Stl => {
                                 println!("{addr} failed during stl write process");
@@ -109,7 +111,7 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
                             StartError::Background => {
                                 println!("{addr} failed during background-builder process");
                             }
-                        }
+                        },
                     },
                     Err(err) => {
                         println!("{addr} error during request: {err:#?}");
@@ -140,13 +142,18 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
 
                 tracing::trace!("sending request to {}", client.addr);
 
-                futs.push(client.channel.print_check(
-                    client_context,
-                    CheckOpts {
-                        layer: layer.clone(),
-                        stl: stl_contents.clone(),
-                    }
-                ).map(|res| (client.addr, res)));
+                futs.push(
+                    client
+                        .channel
+                        .print_check(
+                            client_context,
+                            CheckOpts {
+                                layer: layer.clone(),
+                                stl: stl_contents.clone(),
+                            },
+                        )
+                        .map(|res| (client.addr, res)),
+                );
             }
 
             while let Some((addr, res)) = futs.next().await {
@@ -175,11 +182,15 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
                 }
             }
         }
-        Cmd::Finish => for client in clients {
-            client.channel.print_finish(context::current())
-                .await
-                .context("failed requesting rpc server print finish")?;
-        },
+        Cmd::Finish => {
+            for client in clients {
+                client
+                    .channel
+                    .print_finish(context::current())
+                    .await
+                    .context("failed requesting rpc server print finish")?;
+            }
+        }
     }
 
     Ok(())
