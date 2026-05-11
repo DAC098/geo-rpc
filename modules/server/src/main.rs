@@ -16,6 +16,7 @@ use tarpc::{
     server::{self, Channel, incoming::Incoming},
     tokio_serde::formats::Json,
 };
+use tracing::instrument;
 
 mod config;
 
@@ -100,31 +101,27 @@ impl RpcServer {
 }
 
 impl Rpc for RpcServer {
+    #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
     async fn health(self, _ctx: context::Context) -> String {
-        tracing::info!("{} requesting health", self.peer_addr);
-
         "okay".into()
     }
 
+    #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
     async fn info(self, _ctx: context::Context) -> Info {
-        tracing::info!("{} requesting info", self.peer_addr);
-
         Info { cameras: 0 }
     }
 
+    #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
     async fn print_start(self, _ctx: context::Context) -> Result<(), StartError> {
-        tracing::info!("{} requesting print_start", self.peer_addr);
-
         run_start(&self.exec).await
     }
 
+    #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
     async fn print_check(
         self,
         _ctx: context::Context,
         opts: CheckOpts,
     ) -> Result<bool, CheckError> {
-        tracing::info!("{} requesting print_check", self.peer_addr);
-
         let stl_path = write_tmp_stl(&opts.stl).await.map_err(|err| {
             tracing::error!("failed to create tmp stl file: {err:#?}");
 
@@ -140,9 +137,8 @@ impl Rpc for RpcServer {
         result
     }
 
+    #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
     async fn print_finish(self, _ctx: context::Context) {
-        tracing::info!("{} requesting print_finish", self.peer_addr);
-
         run_finish().await;
     }
 }
