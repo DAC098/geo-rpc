@@ -1,6 +1,9 @@
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    io::Write,
+};
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use clap::{Parser, Subcommand};
 use com::AddrArgs;
 
@@ -21,18 +24,45 @@ struct CliArgs {
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
+    /// pings the specifed node(s) to see if they are active
     Health,
+    /// displays information for the node(s) specified
     Info,
+    /// runs build-background process for the node(s)
     Start,
+    /// runs the compare validator process for the node(s)
     Check {
+        /// the height of a single print layer
         #[arg(long = "layer-height", requires = "number")]
         height: Option<f32>,
 
+        /// the desired layer to check
         #[arg(long = "layer", requires = "height")]
         number: Option<u32>,
 
+        /// path to the stl file for the current print
         stl: PathBuf,
     },
+    /// runs the build-background once and then runs the compare validator,
+    /// multiple times if desired
+    StartCheck {
+        /// the height of a single print layer
+        #[arg(long = "layer-height", requires = "number")]
+        height: Option<f32>,
+
+        /// the desired layer to check
+        #[arg(long = "layer", requires = "height")]
+        number: Option<u32>,
+
+        /// will endlessly repeat the compare validator until otherwise
+        /// specified
+        #[arg(long)]
+        repeat: bool,
+
+        /// path to the stl file for the current print
+        stl: PathBuf,
+    },
+    /// runs the cleanup process for each node
     Finish,
 }
 
@@ -73,6 +103,62 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
             )
             .await
         }
+        Cmd::StartCheck { stl, height, number, repeat } => {
+            println!("running build-background");
+
+            commands::request_start(clients).await?;
+
+            if repeat {
+                while query_continue()? {
+                    println!("running compare validator");
+
+                    commands::request_check(clients, commands::CheckOptions {
+                        stl: stl.clone(), height, number,
+                    }).await?;
+                }
+
+                Ok(())
+            } else {
+                if !query_continue()? {
+                    return Ok(());
+                }
+
+                println!("running compare validator");
+
+                commands::request_check(clients, commands::CheckOptions {
+                    stl, height, number,
+                }).await
+            }
+        }
         Cmd::Finish => commands::request_finish(clients).await,
     }
+}
+
+fn get_input(prefix: &str) -> std::io::Result<String> {
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout().lock();
+
+    stdout.write_all(prefix.as_bytes())?;
+    stdout.flush()?;
+
+    let mut buf = String::new();
+
+    stdin.read_line(&mut buf)?;
+
+    Ok(buf)
+}
+
+fn query_continue() -> anyhow::Result<bool> {
+    for _ in 0..3 {
+        let input = get_input("continue? [y/n] ").context("failed requesting continue")?;
+        let given = input.trim().to_lowercase();
+
+        match given.as_str() {
+            "y" | "" => return Ok(true),
+            "n" => return Ok(false),
+            _ => println!("invalid input"),
+        }
+    }
+
+    Ok(false)
 }
