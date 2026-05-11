@@ -1,4 +1,5 @@
 use std::{
+    fmt::Write,
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     str::FromStr,
@@ -26,6 +27,7 @@ struct CliArgs {
 #[derive(Debug, Subcommand)]
 enum Cmd {
     Health,
+    Info,
     Start {},
     Check {
         #[arg(long = "layer-height", requires = "number")]
@@ -41,6 +43,7 @@ enum Cmd {
 
 struct Client {
     addr: SocketAddr,
+    info: Option<com::Info>,
     channel: RpcClient,
 }
 
@@ -76,21 +79,47 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
                 println!("{} server status: {status}", client.addr);
             }
         }
+        Cmd::Info => {
+            for client in clients {
+                let mut output = format!("{}:\n", client.addr);
+
+                if let Some(info) = &client.info {
+                    write!(&mut output, "    hostname: {}\n", info.hostname).unwrap();
+
+                    if info.cameras.is_empty() {
+                        write!(&mut output, "    no cameras available").unwrap();
+                    } else {
+                        for cam in &info.cameras {
+                            if cam.avail {
+                                write!(&mut output, "    {}: {} available\n", cam.name, cam.serial).unwrap();
+                            } else {
+                                write!(&mut output, "    {}: {} unavailable\n", cam.name, cam.serial).unwrap();
+                            }
+                        }
+                    }
+                } else {
+                    write!(&mut output, "    no additional information").unwrap();
+                }
+
+                println!("{output}");
+            }
+        }
         Cmd::Start {} => {
             let start = Instant::now();
             let mut futs = FuturesUnordered::new();
 
             for client in clients {
+                let client_name = client.get_name();
                 let mut client_context = context::current();
                 client_context.deadline += Duration::new(60, 0);
 
-                tracing::trace!("sending request to {}", client.addr);
+                tracing::trace!("sending request to {client_name}");
 
                 futs.push(
                     client
                         .channel
                         .print_start(client_context)
-                        .map(|res| (client.addr, res)),
+                        .map(|res| (client_name, res)),
                 );
             }
 
@@ -137,10 +166,11 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
             let mut futs = futures::stream::FuturesUnordered::new();
 
             for client in clients {
+                let client_name = client.get_name();
                 let mut client_context = context::current();
                 client_context.deadline += Duration::new(10 * 60, 0);
 
-                tracing::trace!("sending request to {}", client.addr);
+                tracing::trace!("sending request to {client_name}");
 
                 futs.push(
                     client
@@ -152,7 +182,7 @@ async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
                                 stl: stl_contents.clone(),
                             },
                         )
-                        .map(|res| (client.addr, res)),
+                        .map(|res| (client_name, res)),
                 );
             }
 
@@ -247,11 +277,31 @@ async fn load_clients(addrs: &[SocketAddr]) -> anyhow::Result<Vec<Client>> {
             .with_context(|| format!("failed connecting to rpc server: {addr}"))?;
         let channel = RpcClient::new(client::Config::default(), conn).spawn();
 
+        let info = match channel.info(context::current()).await {
+            Ok(info) => Some(info),
+            Err(err) => {
+                tracing::error!("failed retrieving node information: {err:#?}");
+
+                None
+            }
+        };
+
         rtn.push(Client {
             addr: *addr,
+            info,
             channel,
         });
     }
 
     Ok(rtn)
+}
+
+impl Client {
+    fn get_name(&self) -> String {
+        if let Some(info) = &self.info {
+            format!("{}[{}]", info.hostname, self.addr)
+        } else {
+            format!("{}", self.addr)
+        }
+    }
 }

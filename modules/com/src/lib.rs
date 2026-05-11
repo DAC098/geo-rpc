@@ -33,7 +33,15 @@ pub enum CheckError {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Info {
-    pub cameras: u32,
+    pub hostname: String,
+    pub cameras: Vec<Camera>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Camera {
+    pub name: String,
+    pub serial: String,
+    pub avail: bool,
 }
 
 #[tarpc::service]

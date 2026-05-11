@@ -18,6 +18,7 @@ use tarpc::{
 };
 use tracing::instrument;
 
+mod cameras;
 mod config;
 
 use config::PythonExec;
@@ -34,7 +35,14 @@ struct CliArgs {
 #[derive(Clone)]
 struct RpcServer {
     peer_addr: SocketAddr,
-    exec: Arc<config::ExecConfig>,
+    state: Arc<ServerState>,
+}
+
+#[derive(Debug)]
+struct ServerState {
+    hostname: String,
+    exec: config::ExecConfig,
+    known_cameras: cameras::KnownCameras,
 }
 
 #[tokio::main]
@@ -52,6 +60,8 @@ async fn main() -> anyhow::Result<()> {
         bail!("cameras json does not exists");
     }
 
+    let state = ServerState::new(config.exec)?;
+
     let addr = args
         .addr
         .get_server_addr()
@@ -66,8 +76,6 @@ async fn main() -> anyhow::Result<()> {
 
     listener.config_mut().max_frame_length(usize::MAX);
 
-    let exec = Arc::new(config.exec);
-
     listener
         .filter_map(|r| match r {
             Ok(valid) => futures::future::ready(Some(valid)),
@@ -81,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
         .max_channels_per_key(1, |t| t.transport().peer_addr().unwrap().ip())
         .map(|channel| {
             let peer_addr = channel.transport().peer_addr().unwrap();
-            let server = RpcServer::new(peer_addr, exec.clone());
+            let server = RpcServer::new(peer_addr, state.clone());
 
             channel.execute(server.serve()).for_each(async |c| {
                 tokio::spawn(c);
@@ -94,9 +102,27 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+impl ServerState {
+    fn new(exec: config::ExecConfig) -> anyhow::Result<Arc<Self>> {
+        let hostname = hostname::get()
+            .context("failed retrieving server hostname")?
+            .to_string_lossy()
+            .to_string();
+        let known_cameras = cameras::load_known_cameras(&exec.cameras)?;
+
+        tracing::info!("known cameras: {known_cameras:#?}");
+
+        Ok(Arc::new(ServerState {
+            hostname,
+            exec,
+            known_cameras,
+        }))
+    }
+}
+
 impl RpcServer {
-    fn new(peer_addr: SocketAddr, exec: Arc<config::ExecConfig>) -> Self {
-        Self { peer_addr, exec }
+    fn new(peer_addr: SocketAddr, state: Arc<ServerState>) -> Self {
+        Self { peer_addr, state }
     }
 }
 
@@ -108,12 +134,26 @@ impl Rpc for RpcServer {
 
     #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
     async fn info(self, _ctx: context::Context) -> Info {
-        Info { cameras: 0 }
+        let cameras = self
+            .state
+            .known_cameras
+            .iter()
+            .map(|(name, info)| com::Camera {
+                name: name.clone(),
+                serial: info.serial.clone(),
+                avail: info.device.is_some(),
+            })
+            .collect();
+
+        Info {
+            hostname: self.state.hostname.clone(),
+            cameras,
+        }
     }
 
     #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
     async fn print_start(self, _ctx: context::Context) -> Result<(), StartError> {
-        run_start(&self.exec).await
+        run_start(&self.state.exec).await
     }
 
     #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
@@ -128,7 +168,7 @@ impl Rpc for RpcServer {
             CheckError::Stl
         })?;
 
-        let result = run_check(&self.exec, &stl_path, opts.layer.as_ref()).await;
+        let result = run_check(&self.state.exec, &stl_path, opts.layer.as_ref()).await;
 
         if let Err(err) = tokio::fs::remove_file(&stl_path).await {
             tracing::error!("failed to remove tmp stl file: {err:#?}");
