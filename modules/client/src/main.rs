@@ -2,12 +2,16 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     str::FromStr,
-    time::Instant,
+    time::{Instant, Duration},
 };
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
-use com::{AddrArgs, CheckError, CheckOpts, DEFAULT_PORT, LayerOpts, RpcClient, init_logging};
+use com::{AddrArgs, CheckError, CheckOpts, DEFAULT_PORT, LayerOpts, RpcClient, StartError};
+use futures::{
+    FutureExt, StreamExt,
+    stream::FuturesUnordered,
+};
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 #[derive(Debug, Parser)]
@@ -25,6 +29,7 @@ struct CliArgs {
 #[derive(Debug, Subcommand)]
 enum Cmd {
     Health,
+    Start {},
     Check {
         #[arg(long = "layer-height", requires = "number")]
         height: Option<f32>,
@@ -34,6 +39,7 @@ enum Cmd {
 
         stl: PathBuf,
     },
+    Finish,
 }
 
 struct Client {
@@ -43,7 +49,7 @@ struct Client {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_logging();
+    com::init_logging();
 
     let args = CliArgs::parse();
 
@@ -55,9 +61,15 @@ async fn main() -> anyhow::Result<()> {
 
     let clients = load_clients(&addrs).await?;
 
-    match args.cmd {
+    run_cmd(&clients, args.cmd).await?;
+
+    Ok(())
+}
+
+async fn run_cmd(clients: &[Client], cmd: Cmd) -> anyhow::Result<()> {
+    match cmd {
         Cmd::Health => {
-            for client in &clients {
+            for client in clients {
                 let status = client
                     .channel
                     .health(context::current())
@@ -65,6 +77,44 @@ async fn main() -> anyhow::Result<()> {
                     .context("failed requesting rpc server health")?;
 
                 println!("{} server status: {status}", client.addr);
+            }
+        }
+        Cmd::Start { } => {
+            let start = Instant::now();
+            let mut futs = FuturesUnordered::new();
+
+            for client in clients {
+                let mut client_context = context::current();
+                client_context.deadline += Duration::new(60, 0);
+
+                tracing::trace!("sending request to {}", client.addr);
+
+                futs.push(client.channel.print_start(client_context).map(|res| (client.addr, res)));
+            }
+
+            while let Some((addr, res)) = futs.next().await {
+                let duration = start.elapsed();
+
+                tracing::info!("response from {addr} {duration:#?}");
+
+                match res {
+                    Ok(status) => match status {
+                        Ok(()) => {
+                            println!("{addr} finished");
+                        },
+                        Err(err) => match err {
+                            StartError::Stl => {
+                                println!("{addr} failed during stl write process");
+                            }
+                            StartError::Background => {
+                                println!("{addr} failed during background-builder process");
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        println!("{addr} error during request: {err:#?}");
+                    }
+                }
             }
         }
         Cmd::Check {
@@ -82,45 +132,54 @@ async fn main() -> anyhow::Result<()> {
             };
 
             let start = Instant::now();
-            let mut results = Vec::with_capacity(clients.len());
+            let mut futs = futures::stream::FuturesUnordered::new();
 
             for client in clients {
-                let status = client
-                    .channel
-                    .print_check(
-                        context::current(),
-                        CheckOpts {
-                            layer: layer.clone(),
-                            stl: stl_contents.clone(),
-                        },
-                    )
-                    .await
-                    .context("failed requesting rpc server print check")?;
+                let mut client_context = context::current();
+                client_context.deadline += Duration::new(10 * 60, 0);
 
-                results.push((client.addr, status));
+                tracing::trace!("sending request to {}", client.addr);
+
+                futs.push(client.channel.print_check(
+                    client_context,
+                    CheckOpts {
+                        layer: layer.clone(),
+                        stl: stl_contents.clone(),
+                    }
+                ).map(|res| (client.addr, res)));
             }
 
-            let duration = start.elapsed();
+            while let Some((addr, res)) = futs.next().await {
+                let duration = start.elapsed();
 
-            println!("duration: {duration:#?}");
+                tracing::info!("response from {addr} {duration:#?}");
 
-            for (addr, status) in results {
-                match status {
-                    Ok(success) => println!("{addr} print check: {success}"),
-                    Err(err) => match err {
-                        CheckError::Stl => {
-                            println!("{addr} failed during stl write process");
-                        }
-                        CheckError::StlRender => {
-                            println!("{addr} failed during stl-render process");
-                        }
-                        CheckError::Validator => {
-                            println!("{addr} failed during validator process");
-                        }
+                match res {
+                    Ok(status) => match status {
+                        Ok(success) => println!("{addr} print check: {success}"),
+                        Err(err) => match err {
+                            CheckError::Stl => {
+                                println!("{addr} failed during stl write process");
+                            }
+                            CheckError::StlRender => {
+                                println!("{addr} failed during stl-render process");
+                            }
+                            CheckError::Validator => {
+                                println!("{addr} failed during validator process");
+                            }
+                        },
                     },
+                    Err(err) => {
+                        println!("{addr} error during request: {err:#?}");
+                    }
                 }
             }
         }
+        Cmd::Finish => for client in clients {
+            client.channel.print_finish(context::current())
+                .await
+                .context("failed requesting rpc server print finish")?;
+        },
     }
 
     Ok(())
