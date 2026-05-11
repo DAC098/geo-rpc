@@ -59,12 +59,21 @@ pub trait Rpc {
 
 #[derive(Debug, Args)]
 pub struct AddrArgs {
+    /// a single socket address
+    ///
+    /// provide an ip and port in the format of 127.0.0.1:1234 or [::1]:1234
     #[arg(short, long, conflicts_with_all = ["host", "port"])]
     addr: Option<SocketAddr>,
 
+    /// a single ip address
+    ///
+    /// can be Ipv4 or Ipv6, will use the default server port
     #[arg(long, conflicts_with = "addr")]
     host: Option<IpAddr>,
 
+    /// a singe port number
+    ///
+    /// will use the default localhost ip address
     #[arg(short, long, conflicts_with = "addr")]
     port: Option<u16>,
 }

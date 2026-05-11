@@ -25,6 +25,10 @@ use config::PythonExec;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
+    /// config file to use command execution and additional configuration
+    ///
+    /// if no file is provided then it will attempt to look for `config.toml`
+    /// `config.ignore.toml` in the current working directory.
     #[arg(short, long)]
     config: Option<PathBuf>,
 

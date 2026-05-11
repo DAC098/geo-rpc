@@ -12,9 +12,16 @@ mod node;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
+    /// connect to a single node
+    ///
+    /// provide an ip and port or just an ip
     #[command(flatten)]
     addr: Option<AddrArgs>,
 
+    /// a list of nodes to connect to
+    ///
+    /// each line in the file can contain an ip and port or just an ip, any
+    /// line that starts with `#` will be ignored
     #[arg(short, long)]
     nodes: Option<PathBuf>,
 
