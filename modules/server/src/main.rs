@@ -4,7 +4,8 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
-    time::SystemTime,
+    str::FromStr,
+    time::{SystemTime, Duration},
 };
 
 use anyhow::{Context, bail};
@@ -165,7 +166,7 @@ impl Rpc for RpcServer {
         self,
         _ctx: context::Context,
         opts: CheckOpts,
-    ) -> Result<bool, CheckError> {
+    ) -> Result<(bool, Duration), CheckError> {
         let stl_path = write_tmp_stl(&opts.stl).await.map_err(|err| {
             tracing::error!("failed to create tmp stl file: {err:#?}");
 
@@ -266,7 +267,7 @@ async fn run_check<P>(
     exec: &config::ExecConfig,
     stl_path: P,
     layer_opts: Option<&LayerOpts>,
-) -> Result<bool, CheckError>
+) -> Result<(bool, Duration), CheckError>
 where
     P: AsRef<Path>,
 {
@@ -322,16 +323,39 @@ where
             CheckError::Validator
         })?;
 
+    let stdout = std::str::from_utf8(&validator.stdout);
+    let stderr = std::str::from_utf8(&validator.stderr);
+
     if let Some(code) = validator.status.code() {
         // code 0 is passed
         // code 6 is failed
         if code == 0 || code == 6 {
-            return Ok(code == 0);
+            // pull timing information from stdout
+            let duration = match stdout {
+                Ok(utf8) => {
+                    let lines = utf8.split("\n").filter(|v| !v.is_empty());
+
+                    match lines.last().map(f64::from_str) {
+                        Some(Ok(parsed)) => Duration::from_secs_f64(parsed / 1000.0),
+                        Some(Err(_)) => {
+                            tracing::warn!("failed parsing timing of validator output");
+
+                            Duration::new(0, 0)
+                        }
+                        None => {
+                            tracing::trace!("no output from validator");
+
+                            Duration::new(0, 0)
+                        }
+                    }
+                },
+                Err(_) => Duration::new(0, 0),
+            };
+
+            return Ok((code == 0, duration));
         }
     }
 
-    let stdout = std::str::from_utf8(&validator.stdout);
-    let stderr = std::str::from_utf8(&validator.stderr);
 
     match (validator.status.code(), stdout, stderr) {
         (Some(code), Ok(valid_out), Ok(valid_err)) => {

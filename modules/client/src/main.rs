@@ -12,9 +12,6 @@ mod node;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
-    /// connect to a single node
-    ///
-    /// provide an ip and port or just an ip
     #[command(flatten)]
     addr: Option<AddrArgs>,
 

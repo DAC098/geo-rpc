@@ -20,7 +20,9 @@ pub struct CameraConfig {
 
 #[derive(Debug, Clone)]
 pub struct CaptureDevice {
+    #[allow(dead_code)]
     pub path: PathBuf,
+    #[allow(dead_code)]
     pub video_id: i32,
     pub serial: String,
 }
@@ -31,6 +33,7 @@ pub struct CameraInfo {
 
     pub device: Option<CaptureDevice>,
 
+    #[allow(dead_code)]
     pub config: HashMap<String, serde_json::Value>,
 }
 

@@ -173,7 +173,12 @@ where
 
         match res {
             Ok(status) => match status {
-                Ok(success) => println!("{addr} print check: {success}"),
+                Ok((success, duration)) => {
+                    println!(
+                        "{addr} print check: {success} {:.06} ms",
+                        duration.as_millis_f64(),
+                    )
+                }
                 Err(err) => match err {
                     CheckError::Stl => {
                         println!("{addr} failed during stl write process");

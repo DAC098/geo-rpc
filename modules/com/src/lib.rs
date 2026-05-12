@@ -1,4 +1,7 @@
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    time::Duration,
+};
 
 use clap::Args;
 use serde::{Deserialize, Serialize};
@@ -52,7 +55,7 @@ pub trait Rpc {
 
     async fn print_start() -> Result<(), StartError>;
 
-    async fn print_check(opts: CheckOpts) -> Result<bool, CheckError>;
+    async fn print_check(opts: CheckOpts) -> Result<(bool, Duration), CheckError>;
 
     async fn print_finish();
 }
