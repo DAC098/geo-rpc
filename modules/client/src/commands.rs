@@ -176,7 +176,7 @@ where
                 Ok((success, duration)) => {
                     println!(
                         "{addr} print check: {success} {:.06} ms",
-                        duration.as_millis_f64(),
+                        duration.as_secs_f64() * 1000.0,
                     )
                 }
                 Err(err) => match err {
