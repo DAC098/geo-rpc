@@ -3,9 +3,9 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::Arc,
     str::FromStr,
-    time::{SystemTime, Duration},
+    sync::Arc,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{Context, bail};
@@ -348,7 +348,7 @@ where
                             Duration::new(0, 0)
                         }
                     }
-                },
+                }
                 Err(_) => Duration::new(0, 0),
             };
 
@@ -356,15 +356,19 @@ where
         }
     }
 
+    // test
 
-    match (validator.status.code(), stdout, stderr) {
-        (Some(code), Ok(valid_out), Ok(valid_err)) => {
-            tracing::error!(
-                "validator returned non-zero status code {code}\n{valid_out}\n{valid_err}"
-            );
-        }
-        (Some(code), _, _) => tracing::error!("validator returned non-zero status code {code}"),
-        _ => tracing::error!("validator returned unsuccessful"),
+    let valid_out = stdout.unwrap_or("");
+    let valid_err = stderr.unwrap_or("");
+
+    if let Some(code) = validator.status.code() {
+        tracing::error!(
+            "validator returned non-zero status code {code}\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
+        );
+    } else {
+        tracing::error!(
+            "validator returned no status code\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
+        );
     }
 
     Err(CheckError::Validator)

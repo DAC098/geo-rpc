@@ -1,9 +1,6 @@
-use std::{
-    path::PathBuf,
-    io::Write,
-};
+use std::{io::Write, path::PathBuf};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use com::AddrArgs;
 
@@ -107,7 +104,12 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
             )
             .await
         }
-        Cmd::StartCheck { stl, height, number, repeat } => {
+        Cmd::StartCheck {
+            stl,
+            height,
+            number,
+            repeat,
+        } => {
             println!("running build-background");
 
             commands::request_start(clients).await?;
@@ -116,9 +118,15 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
                 while query_continue()? {
                     println!("running compare validator");
 
-                    commands::request_check(clients, commands::CheckOptions {
-                        stl: stl.clone(), height, number,
-                    }).await?;
+                    commands::request_check(
+                        clients,
+                        commands::CheckOptions {
+                            stl: stl.clone(),
+                            height,
+                            number,
+                        },
+                    )
+                    .await?;
                 }
 
                 Ok(())
@@ -129,9 +137,15 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
 
                 println!("running compare validator");
 
-                commands::request_check(clients, commands::CheckOptions {
-                    stl, height, number,
-                }).await
+                commands::request_check(
+                    clients,
+                    commands::CheckOptions {
+                        stl,
+                        height,
+                        number,
+                    },
+                )
+                .await
             }
         }
         Cmd::Finish => commands::request_finish(clients).await,
