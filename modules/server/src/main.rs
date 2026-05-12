@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{Context, bail};
 use clap::Parser;
-use com::{AddrArgs, CheckError, CheckOpts, Info, LayerOpts, Rpc, StartError};
+use com::{AddrArgs, CheckError, CheckOpts, Info, LayerOpts, DimOpts, Rpc, StartError};
 use futures::StreamExt;
 use tarpc::{
     context,
@@ -21,6 +21,7 @@ use tracing::instrument;
 
 mod cameras;
 mod config;
+mod commands;
 
 use config::PythonExec;
 
@@ -64,6 +65,8 @@ async fn main() -> anyhow::Result<()> {
     if !config.exec.cameras.exists() {
         bail!("cameras json does not exists");
     }
+
+    tracing::debug!("config: {config:#?}");
 
     let state = ServerState::new(config.exec)?;
 
@@ -117,6 +120,40 @@ impl ServerState {
 
         tracing::info!("known cameras: {known_cameras:#?}");
 
+        if exec.stereopsis.is_some() {
+            // check to make sure that for now we have exactly one left and
+            // right camera
+            let mut found_left = 0;
+            let mut found_right = 0;
+
+            for (_key, info) in &known_cameras {
+                match info.position {
+                    cameras::CameraPosition::Left => {
+                        if info.device.is_some() {
+                            found_left += 1;
+                        }
+                    }
+                    cameras::CameraPosition::Right => {
+                        if info.device.is_some() {
+                            found_right += 1;
+                        }
+                    }
+                }
+            }
+
+            if found_left == 0 {
+                bail!("no left camera found for stereopsis");
+            }
+
+            if found_right == 0 {
+                bail!("no right camera found for stereopsis");
+            }
+
+            if found_left > 1 || found_right > 1 {
+                bail!("found more than one camera for left or right: left={found_left} right={found_right}");
+            }
+        }
+
         Ok(Arc::new(ServerState {
             hostname,
             exec,
@@ -166,14 +203,20 @@ impl Rpc for RpcServer {
         self,
         _ctx: context::Context,
         opts: CheckOpts,
-    ) -> Result<(bool, Duration), CheckError> {
+    ) -> Result<(bool, Option<bool>, Duration), CheckError> {
         let stl_path = write_tmp_stl(&opts.stl).await.map_err(|err| {
             tracing::error!("failed to create tmp stl file: {err:#?}");
 
             CheckError::Stl
         })?;
 
-        let result = run_check(&self.state.exec, &stl_path, opts.layer.as_ref()).await;
+        let result = run_check(
+            &self.state.exec,
+            &self.state.known_cameras,
+            &stl_path,
+            opts.layer.as_ref(),
+            &opts.dim,
+        ).await;
 
         if let Err(err) = tokio::fs::remove_file(&stl_path).await {
             tracing::error!("failed to remove tmp stl file: {err:#?}");
@@ -265,179 +308,25 @@ where
 
 async fn run_check<P>(
     exec: &config::ExecConfig,
+    cameras: &cameras::KnownCameras,
     stl_path: P,
-    layer_opts: Option<&LayerOpts>,
-) -> Result<(bool, Duration), CheckError>
-where
-    P: AsRef<Path>,
-{
-    let path_ref = stl_path.as_ref();
-
-    tracing::info!("starting stl-render");
-
-    let stl_render = spawn_stl_render(&exec.stl_render, &exec.cameras, path_ref, layer_opts)
-        .map_err(|err| {
-            tracing::error!("failed spawning stl-render: {err:#?}");
-
-            CheckError::StlRender
-        })?
-        .wait_with_output()
-        .await
-        .map_err(|err| {
-            tracing::error!("failed retrieving stl-render status: {err:#?}");
-
-            CheckError::StlRender
-        })?;
-
-    if !stl_render.status.success() {
-        let stdout = std::str::from_utf8(&stl_render.stdout);
-        let stderr = std::str::from_utf8(&stl_render.stderr);
-
-        match (stdout, stderr) {
-            (Ok(valid_out), Ok(valid_err)) => {
-                tracing::error!(
-                    "stl-render returned non-zero status code\n{valid_out}\n{valid_err}"
-                );
-            }
-            _ => {
-                tracing::error!("stl-render returned non-zero status code");
-            }
-        }
-
-        return Err(CheckError::StlRender);
-    }
-
-    tracing::info!("starting validator");
-
-    let validator = spawn_validator(&exec.validator, &exec.cameras, layer_opts)
-        .map_err(|err| {
-            tracing::error!("failed spawning validator: {err:#?}");
-
-            CheckError::Validator
-        })?
-        .wait_with_output()
-        .await
-        .map_err(|err| {
-            tracing::error!("failed retrieving validator status: {err:#?}");
-
-            CheckError::Validator
-        })?;
-
-    let stdout = std::str::from_utf8(&validator.stdout);
-    let stderr = std::str::from_utf8(&validator.stderr);
-
-    if let Some(code) = validator.status.code() {
-        // code 0 is passed
-        // code 6 is failed
-        if code == 0 || code == 6 {
-            // pull timing information from stdout
-            let duration = match stdout {
-                Ok(utf8) => {
-                    let lines = utf8.split("\n").filter(|v| !v.is_empty());
-
-                    match lines.last().map(f64::from_str) {
-                        Some(Ok(parsed)) => Duration::from_secs_f64(parsed / 1000.0),
-                        Some(Err(_)) => {
-                            tracing::warn!("failed parsing timing of validator output");
-
-                            Duration::new(0, 0)
-                        }
-                        None => {
-                            tracing::trace!("no output from validator");
-
-                            Duration::new(0, 0)
-                        }
-                    }
-                }
-                Err(_) => Duration::new(0, 0),
-            };
-
-            return Ok((code == 0, duration));
-        }
-    }
-
-    // test
-
-    let valid_out = stdout.unwrap_or("");
-    let valid_err = stderr.unwrap_or("");
-
-    if let Some(code) = validator.status.code() {
-        tracing::error!(
-            "validator returned non-zero status code {code}\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
-        );
-    } else {
-        tracing::error!(
-            "validator returned no status code\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
-        );
-    }
-
-    Err(CheckError::Validator)
-}
-
-fn spawn_stl_render<CP, SP>(
-    exec: &PythonExec,
-    cameras_path: CP,
-    stl_path: SP,
-    layer_opts: Option<&LayerOpts>,
-) -> anyhow::Result<tokio::process::Child>
-where
-    CP: AsRef<OsStr>,
-    SP: AsRef<OsStr>,
-{
-    tracing::trace!("creating stl-render cmd: {} {}", exec.binary, exec.script);
-
-    let mut cmd = tokio::process::Command::new(&exec.binary);
-
-    cmd.arg(&exec.script)
-        .arg(stl_path)
-        .arg("--cameras")
-        .arg(cameras_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-
-    if let Some(opts) = layer_opts {
-        let height_str = opts.height.to_string();
-        let number_str = opts.number.to_string();
-
-        cmd.arg("--layer-height")
-            .arg(&height_str)
-            .arg("--layers")
-            .arg(&number_str)
-            .spawn()
-            .context("failed starting stl-render")
-    } else {
-        cmd.spawn().context("failed starting stl-render")
-    }
-}
-
-fn spawn_validator<P>(
-    cmd: &str,
-    cameras_path: P,
-    layer_opts: Option<&LayerOpts>,
-) -> anyhow::Result<tokio::process::Child>
+    layer: Option<&LayerOpts>,
+    dim: &DimOpts,
+) -> Result<(bool, Option<bool>, Duration), CheckError>
 where
     P: AsRef<OsStr>,
 {
-    tracing::trace!("creating validator cmd: {cmd}");
+    commands::run_stl_render(exec, stl_path, layer).await?;
 
-    let mut cmd = tokio::process::Command::new(cmd);
+    let (compare_check, dur) = commands::run_compare(exec, layer).await?;
 
-    cmd.arg("--live")
-        .arg("--cameras")
-        .arg(cameras_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    if let Some(opts) = layer_opts {
-        let number_str = opts.number.to_string();
-
-        cmd.arg("--layer-number")
-            .arg(number_str)
-            .spawn()
-            .context("failed starting validator")
+    let stereopsis_check = if compare_check {
+        commands::run_stereopsis(cameras, exec, dim).await?
     } else {
-        cmd.spawn().context("failed starting validator")
-    }
+        None
+    };
+
+    Ok((compare_check, stereopsis_check, dur))
 }
 
 async fn run_finish() {}

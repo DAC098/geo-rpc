@@ -13,9 +13,18 @@ use tracing::instrument;
 #[derive(Debug, Deserialize)]
 pub struct CameraConfig {
     pub serial: String,
+    pub position: CameraPosition,
+    pub full_frame_output_dir: PathBuf,
 
     #[serde(flatten)]
     pub keys: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CameraPosition {
+    Left,
+    Right
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +39,8 @@ pub struct CaptureDevice {
 #[derive(Debug)]
 pub struct CameraInfo {
     pub serial: String,
+    pub position: CameraPosition,
+    pub full_frame_output_dir: PathBuf,
 
     pub device: Option<CaptureDevice>,
 
@@ -115,7 +126,7 @@ where
 
         match key {
             "ID_V4L_CAPABILITIES" => {
-                if !value.contains(":capture") {
+                if !value.contains(":capture:") {
                     // not a capture device
                     return Ok(None);
                 }
@@ -160,6 +171,8 @@ where
             name,
             CameraInfo {
                 serial: config.serial,
+                position: config.position,
+                full_frame_output_dir: config.full_frame_output_dir,
                 device,
                 config: config.keys,
             },

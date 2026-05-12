@@ -15,9 +15,16 @@ pub struct LayerOpts {
     pub number: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DimOpts {
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CheckOpts {
     pub layer: Option<LayerOpts>,
+    pub dim: DimOpts,
     pub stl: Vec<u8>,
 }
 
@@ -32,6 +39,7 @@ pub enum CheckError {
     Stl,
     StlRender,
     Validator,
+    Stereopsis,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -55,7 +63,7 @@ pub trait Rpc {
 
     async fn print_start() -> Result<(), StartError>;
 
-    async fn print_check(opts: CheckOpts) -> Result<(bool, Duration), CheckError>;
+    async fn print_check(opts: CheckOpts) -> Result<(bool, Option<bool>, Duration), CheckError>;
 
     async fn print_finish();
 }

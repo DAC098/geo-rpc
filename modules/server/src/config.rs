@@ -18,12 +18,14 @@ pub struct ExecConfig {
     pub background: String,
     pub stl_render: PythonExec,
     pub validator: String,
+    pub stereopsis: Option<PythonExec>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PythonExec {
     pub binary: String,
     pub script: String,
+    pub args: Vec<String>,
 }
 
 impl ServerConfig {

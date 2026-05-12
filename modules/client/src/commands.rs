@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
-use com::{CheckError, CheckOpts, LayerOpts, StartError};
+use com::{CheckError, CheckOpts, LayerOpts, DimOpts, StartError};
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use tarpc::context;
 
@@ -119,6 +119,8 @@ where
 pub struct CheckOptions {
     pub height: Option<f32>,
     pub number: Option<u32>,
+    pub dim_width: f32,
+    pub dim_height: f32,
     pub stl: PathBuf,
 }
 
@@ -127,6 +129,8 @@ pub async fn request_check<'a, I>(
     CheckOptions {
         height,
         number,
+        dim_width,
+        dim_height,
         stl,
     }: CheckOptions,
 ) -> anyhow::Result<()>
@@ -140,6 +144,10 @@ where
         (Some(height), Some(number)) => Some(LayerOpts { height, number }),
         (None, None) => None,
         _ => unreachable!("clap failed to properly parse layer options"),
+    };
+    let dim = DimOpts {
+        width: dim_width,
+        height: dim_height,
     };
 
     let start = Instant::now();
@@ -159,6 +167,7 @@ where
                     client_context,
                     CheckOpts {
                         layer: layer.clone(),
+                        dim: dim.clone(),
                         stl: stl_contents.clone(),
                     },
                 )
@@ -173,9 +182,15 @@ where
 
         match res {
             Ok(status) => match status {
-                Ok((success, duration)) => {
+                Ok((compare, stereopsis, duration)) => {
+                    let stereopsis_result = if let Some(result) = stereopsis {
+                        if result { "true" } else { "false" }
+                    } else {
+                        "skipped"
+                    };
+
                     println!(
-                        "{addr} print check: {success} {:.06} ms",
+                        "{addr} print check:\ncompare: {compare} {:.06} ms\nstereopsis: {stereopsis_result}",
                         duration.as_secs_f64() * 1000.0,
                     )
                 }
@@ -188,6 +203,9 @@ where
                     }
                     CheckError::Validator => {
                         println!("{addr} failed during validator process");
+                    }
+                    CheckError::Stereopsis => {
+                        println!("{addr} failed during stereopsis process");
                     }
                 },
             },

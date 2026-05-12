@@ -41,6 +41,14 @@ enum Cmd {
         #[arg(long = "layer", requires = "height")]
         number: Option<u32>,
 
+        /// the height of the stl file being used
+        #[arg(long = "height")]
+        dim_height: f32,
+
+        /// the width of the stl file being used
+        #[arg(long = "width")]
+        dim_width: f32,
+
         /// path to the stl file for the current print
         stl: PathBuf,
     },
@@ -54,6 +62,14 @@ enum Cmd {
         /// the desired layer to check
         #[arg(long = "layer", requires = "height")]
         number: Option<u32>,
+
+        /// the height of the stl file being used
+        #[arg(long = "height")]
+        dim_height: f32,
+
+        /// the width of the stl file being used
+        #[arg(long = "width")]
+        dim_width: f32,
 
         /// will endlessly repeat the compare validator until otherwise
         /// specified
@@ -92,6 +108,8 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
         Cmd::Check {
             stl,
             height,
+            dim_height,
+            dim_width,
             number,
         } => {
             commands::request_check(
@@ -100,6 +118,8 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
                     stl,
                     height,
                     number,
+                    dim_width,
+                    dim_height,
                 },
             )
             .await
@@ -108,6 +128,8 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
             stl,
             height,
             number,
+            dim_width,
+            dim_height,
             repeat,
         } => {
             println!("running build-background");
@@ -124,6 +146,8 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
                             stl: stl.clone(),
                             height,
                             number,
+                            dim_width,
+                            dim_height,
                         },
                     )
                     .await?;
@@ -143,6 +167,8 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
                         stl,
                         height,
                         number,
+                        dim_width,
+                        dim_height,
                     },
                 )
                 .await
