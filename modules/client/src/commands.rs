@@ -182,17 +182,27 @@ where
 
         match res {
             Ok(status) => match status {
-                Ok((compare, stereopsis, duration)) => {
-                    let stereopsis_result = if let Some(result) = stereopsis {
-                        if result { "true" } else { "false" }
-                    } else {
-                        "skipped"
-                    };
+                Ok((compare, stereopsis)) => {
+                    println!("{addr} print check");
 
-                    println!(
-                        "{addr} print check:\ncompare: {compare} {:.06} ms\nstereopsis: {stereopsis_result}",
-                        duration.as_secs_f64() * 1000.0,
-                    )
+                    {
+                        println!(
+                            "compare: {}\ngeo_val_time: {:.06} ms\nexec_time: {:.09} secs",
+                            compare.success,
+                            compare.geo_val_time.as_secs_f64() * 1000.0,
+                            compare.exec_time.as_secs_f64(),
+                        );
+                    }
+
+                    if let Some(results) = stereopsis {
+                        println!(
+                            "stereopsis: {}\nexec_time: {:.09} secs",
+                            results.success,
+                            compare.exec_time.as_secs_f64(),
+                        );
+                    } else {
+                        println!("stereopsis: skipped");
+                    }
                 }
                 Err(err) => match err {
                     CheckError::Stl => {

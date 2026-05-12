@@ -1,16 +1,15 @@
 use std::{
     ffi::OsStr,
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Stdio,
-    str::FromStr,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 
 use anyhow::{Context, bail};
 use clap::Parser;
-use com::{AddrArgs, CheckError, CheckOpts, Info, LayerOpts, DimOpts, Rpc, StartError};
+use com::{AddrArgs, CheckError, CheckOpts, Info, LayerOpts, DimOpts, Rpc, StartError, CompareResults, StereopsisResults};
 use futures::StreamExt;
 use tarpc::{
     context,
@@ -22,8 +21,6 @@ use tracing::instrument;
 mod cameras;
 mod config;
 mod commands;
-
-use config::PythonExec;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
@@ -203,7 +200,7 @@ impl Rpc for RpcServer {
         self,
         _ctx: context::Context,
         opts: CheckOpts,
-    ) -> Result<(bool, Option<bool>, Duration), CheckError> {
+    ) -> Result<(CompareResults, Option<StereopsisResults>), CheckError> {
         let stl_path = write_tmp_stl(&opts.stl).await.map_err(|err| {
             tracing::error!("failed to create tmp stl file: {err:#?}");
 
@@ -312,21 +309,21 @@ async fn run_check<P>(
     stl_path: P,
     layer: Option<&LayerOpts>,
     dim: &DimOpts,
-) -> Result<(bool, Option<bool>, Duration), CheckError>
+) -> Result<(CompareResults, Option<StereopsisResults>), CheckError>
 where
     P: AsRef<OsStr>,
 {
     commands::run_stl_render(exec, stl_path, layer).await?;
 
-    let (compare_check, dur) = commands::run_compare(exec, layer).await?;
+    let compare_check = commands::run_compare(exec, layer).await?;
 
-    let stereopsis_check = if compare_check {
+    let stereopsis_check = if compare_check.success {
         commands::run_stereopsis(cameras, exec, dim).await?
     } else {
         None
     };
 
-    Ok((compare_check, stereopsis_check, dur))
+    Ok((compare_check, stereopsis_check))
 }
 
 async fn run_finish() {}

@@ -55,6 +55,19 @@ pub struct Camera {
     pub avail: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CompareResults {
+    pub success: bool,
+    pub geo_val_time: Duration,
+    pub exec_time: Duration,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StereopsisResults {
+    pub success: bool,
+    pub exec_time: Duration,
+}
+
 #[tarpc::service]
 pub trait Rpc {
     async fn health() -> String;
@@ -63,7 +76,7 @@ pub trait Rpc {
 
     async fn print_start() -> Result<(), StartError>;
 
-    async fn print_check(opts: CheckOpts) -> Result<(bool, Option<bool>, Duration), CheckError>;
+    async fn print_check(opts: CheckOpts) -> Result<(CompareResults, Option<StereopsisResults>), CheckError>;
 
     async fn print_finish();
 }

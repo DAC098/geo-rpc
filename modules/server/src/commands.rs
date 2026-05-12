@@ -1,24 +1,14 @@
 use std::{
     ffi::OsStr,
-    net::SocketAddr,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Stdio,
     str::FromStr,
-    sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant},
 };
 
-use anyhow::{Context, bail};
-use clap::Parser;
-use com::{AddrArgs, CheckError, CheckOpts, Info, LayerOpts, DimOpts, Rpc, StartError};
-use futures::StreamExt;
+use anyhow::Context;
+use com::{CheckError, LayerOpts, DimOpts, CompareResults, StereopsisResults};
 use serde::Deserialize;
-use tarpc::{
-    context,
-    server::{self, Channel, incoming::Incoming},
-    tokio_serde::formats::Json,
-};
-use tracing::instrument;
 
 use crate::config::{PythonExec, ExecConfig};
 use crate::cameras::{KnownCameras, CameraPosition};
@@ -113,7 +103,9 @@ where
 pub async fn run_compare(
     exec: &ExecConfig,
     layer_opts: Option<&LayerOpts>,
-) -> Result<(bool, Duration), CheckError> {
+) -> Result<CompareResults, CheckError> {
+    let start = Instant::now();
+
     let validator = spawn_compare(&exec.validator, &exec.cameras, layer_opts)
         .map_err(|err| {
             tracing::error!("failed spawning validator: {err:#?}");
@@ -128,6 +120,8 @@ pub async fn run_compare(
             CheckError::Validator
         })?;
 
+    let exec_time = start.elapsed();
+
     let stdout = std::str::from_utf8(&validator.stdout);
     let stderr = std::str::from_utf8(&validator.stderr);
 
@@ -136,7 +130,7 @@ pub async fn run_compare(
         // code 6 is failed
         if code == 0 || code == 6 {
             // pull timing information from stdout
-            let duration = match stdout {
+            let geo_val_time = match stdout {
                 Ok(utf8) => {
                     let lines = utf8.split("\n").filter(|v| !v.is_empty());
 
@@ -157,7 +151,11 @@ pub async fn run_compare(
                 Err(_) => Duration::new(0, 0),
             };
 
-            return Ok((code == 0, duration));
+            return Ok(CompareResults {
+                success: code == 0,
+                geo_val_time,
+                exec_time,
+            });
         }
     }
 
@@ -218,12 +216,14 @@ pub async fn run_stereopsis(
     cameras: &KnownCameras,
     exec: &ExecConfig,
     dim: &DimOpts,
-) -> Result<Option<bool>, CheckError> {
+) -> Result<Option<StereopsisResults>, CheckError> {
     let Some(exec_args) = &exec.stereopsis else {
         return Ok(None);
     };
 
     let json_output = PathBuf::from("/tmp/stereopsis_results.json");
+
+    let start = Instant::now();
 
     let result = spawn_stereopsis(cameras, exec_args, dim, &json_output)
         .map_err(|err| {
@@ -238,6 +238,8 @@ pub async fn run_stereopsis(
 
             CheckError::Stereopsis
         })?;
+
+    let exec_time = start.elapsed();
 
     let stdout = std::str::from_utf8(&result.stdout).unwrap_or("");
     let stderr = std::str::from_utf8(&result.stderr).unwrap_or("");
@@ -270,7 +272,10 @@ pub async fn run_stereopsis(
         CheckError::Stereopsis
     })?;
 
-    Ok(Some(json.overall_passed))
+    Ok(Some(StereopsisResults {
+        success: json.overall_passed,
+        exec_time,
+    }))
 }
 
 fn spawn_stereopsis<P>(
@@ -296,7 +301,7 @@ where
         }
     }
 
-    for (key, info) in cameras {
+    for (_key, info) in cameras {
         match info.position {
             CameraPosition::Left => {
                 let original = info.full_frame_output_dir.join("full_frame_original.png");
