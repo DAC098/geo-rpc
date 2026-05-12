@@ -81,7 +81,11 @@ where
     let mut cmd = tokio::process::Command::new(&exec.binary);
 
     for additional in &exec.args {
-        cmd.arg(additional);
+        cmd.arg(&additional.flag);
+
+        if let Some(value) = &additional.value {
+            cmd.arg(value);
+        }
     }
 
     cmd.arg(&exec.script)
@@ -285,14 +289,18 @@ where
     cmd.arg(&exec.script);
 
     for additional in &exec.args {
-        cmd.arg(additional);
+        cmd.arg(&additional.flag);
+
+        if let Some(value) = &additional.value {
+            cmd.arg(value);
+        }
     }
 
     for (key, info) in cameras {
         match info.position {
             CameraPosition::Left => {
                 let original = info.full_frame_output_dir.join("full_frame_original.png");
-                let overlay = info.full_frame_output_dir.join("full_frame_fitted_cad_overaly.png");
+                let overlay = info.full_frame_output_dir.join("full_frame_fitted_cad_overlay.png");
 
                 cmd.arg("--left-image")
                     .arg(original)
@@ -301,7 +309,7 @@ where
             }
             CameraPosition::Right => {
                 let original = info.full_frame_output_dir.join("full_frame_original.png");
-                let overlay = info.full_frame_output_dir.join("full_frame_fitted_cad_overaly.png");
+                let overlay = info.full_frame_output_dir.join("full_frame_fitted_cad_overlay.png");
 
                 cmd.arg("--right-image")
                     .arg(original)
@@ -314,12 +322,14 @@ where
     let width_str = dim.width.to_string();
     let height_str = dim.height.to_string();
 
-    cmd.arg("--exepected-width")
+    cmd.arg("--expected-width")
         .arg(&width_str)
         .arg("--expected-height")
         .arg(&height_str)
         .arg("--json-output")
         .arg(json)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .context("failed starting stereopsis")
 }

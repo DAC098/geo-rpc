@@ -25,7 +25,13 @@ pub struct ExecConfig {
 pub struct PythonExec {
     pub binary: String,
     pub script: String,
-    pub args: Vec<String>,
+    pub args: Vec<StaticArg>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StaticArg {
+    pub flag: String,
+    pub value: Option<String>,
 }
 
 impl ServerConfig {
