@@ -56,6 +56,11 @@ pub struct Camera {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct BackgroundResults {
+    pub exec_time: Duration,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CompareResults {
     pub success: bool,
     pub geo_val_time: Duration,
@@ -74,9 +79,11 @@ pub trait Rpc {
 
     async fn info() -> Info;
 
-    async fn print_start() -> Result<(), StartError>;
+    async fn print_start() -> Result<BackgroundResults, StartError>;
 
-    async fn print_check(opts: CheckOpts) -> Result<(CompareResults, Option<StereopsisResults>), CheckError>;
+    async fn print_check(
+        opts: CheckOpts,
+    ) -> Result<(CompareResults, Option<StereopsisResults>), CheckError>;
 
     async fn print_finish();
 }

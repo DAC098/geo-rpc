@@ -1,15 +1,11 @@
-use std::{
-    ffi::OsStr,
-    net::SocketAddr,
-    path::PathBuf,
-    process::Stdio,
-    sync::Arc,
-    time::SystemTime,
-};
+use std::{ffi::OsStr, net::SocketAddr, path::PathBuf, sync::Arc, time::SystemTime};
 
 use anyhow::{Context, bail};
 use clap::Parser;
-use com::{AddrArgs, CheckError, CheckOpts, Info, LayerOpts, DimOpts, Rpc, StartError, CompareResults, StereopsisResults};
+use com::{
+    AddrArgs, BackgroundResults, CheckError, CheckOpts, CompareResults, DimOpts, Info, LayerOpts,
+    Rpc, StartError, StereopsisResults,
+};
 use futures::StreamExt;
 use tarpc::{
     context,
@@ -19,8 +15,8 @@ use tarpc::{
 use tracing::instrument;
 
 mod cameras;
-mod config;
 mod commands;
+mod config;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
@@ -123,7 +119,7 @@ impl ServerState {
             let mut found_left = 0;
             let mut found_right = 0;
 
-            for (_key, info) in &known_cameras {
+            for info in known_cameras.values() {
                 match info.position {
                     cameras::CameraPosition::Left => {
                         if info.device.is_some() {
@@ -147,7 +143,9 @@ impl ServerState {
             }
 
             if found_left > 1 || found_right > 1 {
-                bail!("found more than one camera for left or right: left={found_left} right={found_right}");
+                bail!(
+                    "found more than one camera for left or right: left={found_left} right={found_right}"
+                );
             }
         }
 
@@ -191,7 +189,7 @@ impl Rpc for RpcServer {
     }
 
     #[instrument(level="trace", skip_all, fields(peer_addr=%self.peer_addr))]
-    async fn print_start(self, _ctx: context::Context) -> Result<(), StartError> {
+    async fn print_start(self, _ctx: context::Context) -> Result<BackgroundResults, StartError> {
         run_start(&self.state.exec).await
     }
 
@@ -213,7 +211,8 @@ impl Rpc for RpcServer {
             &stl_path,
             opts.layer.as_ref(),
             &opts.dim,
-        ).await;
+        )
+        .await;
 
         if let Err(err) = tokio::fs::remove_file(&stl_path).await {
             tracing::error!("failed to remove tmp stl file: {err:#?}");
@@ -265,42 +264,10 @@ fn get_tmp_file() -> anyhow::Result<PathBuf> {
     }
 }
 
-async fn run_start(exec: &config::ExecConfig) -> Result<(), StartError> {
-    tracing::info!("starting background-builder");
+async fn run_start(exec: &config::ExecConfig) -> Result<BackgroundResults, StartError> {
+    tracing::info!("running background-builder");
 
-    let status = spawn_background_builder(&exec.background, &exec.cameras)
-        .map_err(|err| {
-            tracing::error!("failed spawning background-builder: {err:#?}");
-
-            StartError::Background
-        })?
-        .wait()
-        .await
-        .map_err(|err| {
-            tracing::error!("failed retrieving background-builder status: {err:#?}");
-
-            StartError::Background
-        })?;
-
-    if !status.success() {
-        tracing::error!("background-builder returned non-zero status code");
-
-        return Err(StartError::Background);
-    }
-
-    Ok(())
-}
-
-fn spawn_background_builder<P>(cmd: &str, cameras_path: P) -> anyhow::Result<tokio::process::Child>
-where
-    P: AsRef<OsStr>,
-{
-    tokio::process::Command::new(cmd)
-        .arg(cameras_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed running background builder")
+    commands::run_background_builder(exec).await
 }
 
 async fn run_check<P>(
@@ -313,13 +280,21 @@ async fn run_check<P>(
 where
     P: AsRef<OsStr>,
 {
+    tracing::info!("running stl-render");
+
     commands::run_stl_render(exec, stl_path, layer).await?;
+
+    tracing::info!("running compare");
 
     let compare_check = commands::run_compare(exec, layer).await?;
 
     let stereopsis_check = if compare_check.success {
+        tracing::info!("running stereopsis");
+
         commands::run_stereopsis(cameras, exec, dim).await?
     } else {
+        tracing::info!("skipping stereopsis");
+
         None
     };
 

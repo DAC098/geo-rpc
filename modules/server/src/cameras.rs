@@ -24,7 +24,7 @@ pub struct CameraConfig {
 #[serde(rename_all = "lowercase")]
 pub enum CameraPosition {
     Left,
-    Right
+    Right,
 }
 
 #[derive(Debug, Clone)]
@@ -62,8 +62,7 @@ pub fn find_capture_devices() -> anyhow::Result<Vec<CaptureDevice>> {
         let maybe_video = path
             .file_name()
             .and_then(OsStr::to_str)
-            .map(|v| v.strip_prefix("video"))
-            .flatten();
+            .and_then(|v| v.strip_prefix("video"));
 
         let Some(str_video_id) = maybe_video else {
             continue;
@@ -111,7 +110,7 @@ where
 
     let mut serial: Option<String> = None;
 
-    for (_index, line) in output.split("\n").enumerate() {
+    for line in output.split("\n") {
         let Some((t, data)) = line.split_once(": ") else {
             continue;
         };

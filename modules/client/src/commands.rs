@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
-use com::{CheckError, CheckOpts, LayerOpts, DimOpts, StartError};
+use com::{CheckError, CheckOpts, DimOpts, LayerOpts, StartError};
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use tarpc::context;
 
@@ -37,22 +37,18 @@ where
         let mut output = format!("{}:\n", client.addr);
 
         if let Some(info) = &client.info {
-            write!(&mut output, "    hostname: {}\n", info.hostname).unwrap();
+            writeln!(&mut output, "    hostname: {}", info.hostname).unwrap();
 
             if info.cameras.is_empty() {
                 write!(&mut output, "    no cameras available").unwrap();
             } else {
                 for cam in &info.cameras {
                     if cam.avail {
-                        write!(&mut output, "    {}: {} available\n", cam.name, cam.serial)
+                        writeln!(&mut output, "    {}: {} available", cam.name, cam.serial)
                             .unwrap();
                     } else {
-                        write!(
-                            &mut output,
-                            "    {}: {} unavailable\n",
-                            cam.name, cam.serial
-                        )
-                        .unwrap();
+                        writeln!(&mut output, "    {}: {} unavailable", cam.name, cam.serial)
+                            .unwrap();
                     }
                 }
             }
@@ -95,8 +91,11 @@ where
 
         match res {
             Ok(status) => match status {
-                Ok(()) => {
-                    println!("{addr} finished");
+                Ok(results) => {
+                    println!(
+                        "{addr} finished {:.09} secs",
+                        results.exec_time.as_secs_f64()
+                    );
                 }
                 Err(err) => match err {
                     StartError::Stl => {

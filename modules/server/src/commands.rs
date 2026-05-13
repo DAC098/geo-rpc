@@ -7,30 +7,44 @@ use std::{
 };
 
 use anyhow::Context;
-use com::{CheckError, LayerOpts, DimOpts, CompareResults, StereopsisResults};
+use com::{
+    BackgroundResults, CheckError, CompareResults, DimOpts, LayerOpts, StartError,
+    StereopsisResults,
+};
 use serde::Deserialize;
+use tokio::process::{Child, Command};
+use tracing::instrument;
 
-use crate::config::{PythonExec, ExecConfig};
-use crate::cameras::{KnownCameras, CameraPosition};
+use crate::cameras::{CameraPosition, KnownCameras};
+use crate::config::{ExecConfig, PythonExec};
 
+fn trace_arguments(cmd: &Command) {
+    if tracing::enabled!(tracing::Level::TRACE) {
+        let args: Vec<&OsStr> = cmd.as_std().get_args().collect();
+
+        tracing::trace!("command arguments: {args:#?}");
+    }
+}
+
+#[instrument(level = "trace", skip_all)]
 pub async fn run_stl_render<P>(
     exec: &ExecConfig,
     stl_path: P,
-    layer_opts: Option<&LayerOpts>
+    layer_opts: Option<&LayerOpts>,
 ) -> Result<(), CheckError>
 where
     P: AsRef<OsStr>,
 {
     let stl_render = spawn_stl_render(&exec.stl_render, &exec.cameras, stl_path, layer_opts)
         .map_err(|err| {
-            tracing::error!("failed spawning stl-render: {err:#?}");
+            tracing::error!("failed spawning: {err:#?}");
 
             CheckError::StlRender
         })?
         .wait_with_output()
         .await
         .map_err(|err| {
-            tracing::error!("failed retrieving stl-render status: {err:#?}");
+            tracing::error!("failed retrieving status: {err:#?}");
 
             CheckError::StlRender
         })?;
@@ -41,9 +55,7 @@ where
 
         match (stdout, stderr) {
             (Ok(valid_out), Ok(valid_err)) => {
-                tracing::error!(
-                    "stl-render returned non-zero status code\n{valid_out}\n{valid_err}"
-                );
+                tracing::error!("returned non-zero status code\n{valid_out}\n{valid_err}");
             }
             _ => {
                 tracing::error!("stl-render returned non-zero status code");
@@ -56,19 +68,22 @@ where
     }
 }
 
+#[instrument(level = "trace", skip_all)]
 fn spawn_stl_render<CP, SP>(
     exec: &PythonExec,
     cameras_path: CP,
     stl_path: SP,
     layer_opts: Option<&LayerOpts>,
-) -> anyhow::Result<tokio::process::Child>
+) -> anyhow::Result<Child>
 where
     CP: AsRef<OsStr>,
     SP: AsRef<OsStr>,
 {
-    tracing::trace!("creating stl-render cmd: {} {}", exec.binary, exec.script);
+    tracing::trace!("creating cmd: {} {}", exec.binary, exec.script);
 
-    let mut cmd = tokio::process::Command::new(&exec.binary);
+    let mut cmd = Command::new(&exec.binary);
+
+    tracing::trace!("adding static arguments");
 
     for additional in &exec.args {
         cmd.arg(&additional.flag);
@@ -86,20 +101,23 @@ where
         .stderr(Stdio::piped());
 
     if let Some(opts) = layer_opts {
+        tracing::trace!("adding layer height and number");
+
         let height_str = opts.height.to_string();
         let number_str = opts.number.to_string();
 
         cmd.arg("--layer-height")
             .arg(&height_str)
             .arg("--layers")
-            .arg(&number_str)
-            .spawn()
-            .context("failed starting stl-render")
-    } else {
-        cmd.spawn().context("failed starting stl-render")
+            .arg(&number_str);
     }
+
+    trace_arguments(&cmd);
+
+    cmd.spawn().context("spawn failed")
 }
 
+#[instrument(level = "trace", skip_all)]
 pub async fn run_compare(
     exec: &ExecConfig,
     layer_opts: Option<&LayerOpts>,
@@ -108,14 +126,14 @@ pub async fn run_compare(
 
     let validator = spawn_compare(&exec.validator, &exec.cameras, layer_opts)
         .map_err(|err| {
-            tracing::error!("failed spawning validator: {err:#?}");
+            tracing::error!("failed spawning: {err:#?}");
 
             CheckError::Validator
         })?
         .wait_with_output()
         .await
         .map_err(|err| {
-            tracing::error!("failed retrieving validator status: {err:#?}");
+            tracing::error!("failed retrieving status: {err:#?}");
 
             CheckError::Validator
         })?;
@@ -166,28 +184,29 @@ pub async fn run_compare(
 
     if let Some(code) = validator.status.code() {
         tracing::error!(
-            "validator returned non-zero status code {code}\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
+            "returned non-zero status code {code}\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
         );
     } else {
         tracing::error!(
-            "validator returned no status code\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
+            "returned no status code\nstdout: \"{valid_out}\"\nstderr: \"{valid_err}\""
         );
     }
 
     Err(CheckError::Validator)
 }
 
+#[instrument(level = "trace", skip_all)]
 fn spawn_compare<P>(
     cmd: &str,
     cameras_path: P,
     layer_opts: Option<&LayerOpts>,
-) -> anyhow::Result<tokio::process::Child>
+) -> anyhow::Result<Child>
 where
     P: AsRef<OsStr>,
 {
-    tracing::trace!("creating validator cmd: {cmd}");
+    tracing::trace!("creating cmd: {cmd}");
 
-    let mut cmd = tokio::process::Command::new(cmd);
+    let mut cmd = Command::new(cmd);
 
     cmd.arg("--live")
         .arg("--cameras")
@@ -196,15 +215,16 @@ where
         .stderr(Stdio::piped());
 
     if let Some(opts) = layer_opts {
+        tracing::trace!("adding layer number");
+
         let number_str = opts.number.to_string();
 
-        cmd.arg("--layer-number")
-            .arg(number_str)
-            .spawn()
-            .context("failed starting validator")
-    } else {
-        cmd.spawn().context("failed starting validator")
+        cmd.arg("--layer-number").arg(number_str);
     }
+
+    trace_arguments(&cmd);
+
+    cmd.spawn().context("spawn failed")
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,12 +232,15 @@ pub struct StereopsisJson {
     overall_passed: bool,
 }
 
+#[instrument(level = "trace", skip_all)]
 pub async fn run_stereopsis(
     cameras: &KnownCameras,
     exec: &ExecConfig,
     dim: &DimOpts,
 ) -> Result<Option<StereopsisResults>, CheckError> {
     let Some(exec_args) = &exec.stereopsis else {
+        tracing::info!("disabled");
+
         return Ok(None);
     };
 
@@ -227,14 +250,14 @@ pub async fn run_stereopsis(
 
     let result = spawn_stereopsis(cameras, exec_args, dim, &json_output)
         .map_err(|err| {
-            tracing::error!("failed spawning stereopsis: {err:#?}");
+            tracing::error!("failed spawning: {err:#?}");
 
             CheckError::Stereopsis
         })?
         .wait_with_output()
         .await
         .map_err(|err| {
-            tracing::error!("failed retrieving stereopsis status: {err:#?}");
+            tracing::error!("failed retrieving status: {err:#?}");
 
             CheckError::Stereopsis
         })?;
@@ -247,27 +270,23 @@ pub async fn run_stereopsis(
     if !result.status.success() {
         if let Some(code) = result.status.code() {
             tracing::error!(
-                "stereopsis returned non-zero status code {code}\nstdout: \"{stdout}\"\nstderr: \"{stderr}\""
+                "returned non-zero status code {code}\nstdout: \"{stdout}\"\nstderr: \"{stderr}\""
             );
         } else {
-            tracing::error!(
-                "stereopsis returned no status code\nstdout: \"{stdout}\"\nstderr: \"{stderr}\""
-            );
+            tracing::error!("returned no status code\nstdout: \"{stdout}\"\nstderr: \"{stderr}\"");
         }
 
         return Err(CheckError::Stereopsis);
     }
 
-    let contents = tokio::fs::read(&json_output)
-        .await
-        .map_err(|err| {
-            tracing::error!("failed reading stereopsis json results: {err:#?}");
+    let contents = tokio::fs::read(&json_output).await.map_err(|err| {
+        tracing::error!("failed reading json results: {err:#?}");
 
-            CheckError::Stereopsis
-        })?;
+        CheckError::Stereopsis
+    })?;
 
     let json: StereopsisJson = serde_json::from_slice(&contents).map_err(|err| {
-        tracing::error!("failed parsing stereopsis json: {err:#?}");
+        tracing::error!("failed parsing json: {err:#?}");
 
         CheckError::Stereopsis
     })?;
@@ -278,18 +297,19 @@ pub async fn run_stereopsis(
     }))
 }
 
+#[instrument(level = "trace", skip_all)]
 fn spawn_stereopsis<P>(
     cameras: &KnownCameras,
     exec: &PythonExec,
     dim: &DimOpts,
     json: P,
-) -> anyhow::Result<tokio::process::Child>
+) -> anyhow::Result<Child>
 where
-    P: AsRef<OsStr>
+    P: AsRef<OsStr>,
 {
-    tracing::trace!("creating stereopsis cmd: {} {}", exec.binary, exec.script);
+    tracing::trace!("creating cmd: {} {}", exec.binary, exec.script);
 
-    let mut cmd = tokio::process::Command::new(&exec.binary);
+    let mut cmd = Command::new(&exec.binary);
 
     cmd.arg(&exec.script);
 
@@ -301,11 +321,15 @@ where
         }
     }
 
-    for (_key, info) in cameras {
+    for (key, info) in cameras {
         match info.position {
             CameraPosition::Left => {
+                tracing::trace!("adding left camera: {key}");
+
                 let original = info.full_frame_output_dir.join("full_frame_original.png");
-                let overlay = info.full_frame_output_dir.join("full_frame_fitted_cad_overlay.png");
+                let overlay = info
+                    .full_frame_output_dir
+                    .join("full_frame_fitted_cad_overlay.png");
 
                 cmd.arg("--left-image")
                     .arg(original)
@@ -313,8 +337,12 @@ where
                     .arg(overlay);
             }
             CameraPosition::Right => {
+                tracing::trace!("adding right camera {key}");
+
                 let original = info.full_frame_output_dir.join("full_frame_original.png");
-                let overlay = info.full_frame_output_dir.join("full_frame_fitted_cad_overlay.png");
+                let overlay = info
+                    .full_frame_output_dir
+                    .join("full_frame_fitted_cad_overlay.png");
 
                 cmd.arg("--right-image")
                     .arg(original)
@@ -334,7 +362,63 @@ where
         .arg("--json-output")
         .arg(json)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed starting stereopsis")
+        .stderr(Stdio::piped());
+
+    trace_arguments(&cmd);
+
+    cmd.spawn().context("spawn failed")
+}
+
+#[instrument(level = "trace", skip_all)]
+pub async fn run_background_builder(exec: &ExecConfig) -> Result<BackgroundResults, StartError> {
+    let start = Instant::now();
+
+    let result = spawn_background_builder(&exec.background, &exec.cameras)
+        .map_err(|err| {
+            tracing::error!("failed spawning background-builder: {err:#?}");
+
+            StartError::Background
+        })?
+        .wait_with_output()
+        .await
+        .map_err(|err| {
+            tracing::error!("failed retrieving background-builder status: {err:#?}");
+
+            StartError::Background
+        })?;
+
+    let exec_time = start.elapsed();
+
+    let stdout = std::str::from_utf8(&result.stdout).unwrap_or("");
+    let stderr = std::str::from_utf8(&result.stderr).unwrap_or("");
+
+    if !result.status.success() {
+        if let Some(code) = result.status.code() {
+            tracing::error!(
+                "returned non-zero status code {code}\nstdout: \"{stdout}\"\nstderr: \"{stderr}\""
+            );
+        } else {
+            tracing::error!("returned no status code\nstdout: \"{stdout}\"\nstderr: \"{stderr}\"");
+        }
+
+        return Err(StartError::Background);
+    }
+
+    Ok(BackgroundResults { exec_time })
+}
+
+#[instrument(level = "trace", skip_all)]
+fn spawn_background_builder<P>(exec: &str, cameras_path: P) -> anyhow::Result<tokio::process::Child>
+where
+    P: AsRef<OsStr>,
+{
+    let mut cmd = Command::new(exec);
+
+    cmd.arg(cameras_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    trace_arguments(&cmd);
+
+    cmd.spawn().context("spawn failed")
 }
