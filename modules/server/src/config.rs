@@ -41,6 +41,7 @@ pub struct PythonExec {
     /// the python script to use
     pub script: String,
     /// any addtional static argumets to apply
+    #[serde(default)]
     pub args: Vec<StaticArg>,
 }
 
