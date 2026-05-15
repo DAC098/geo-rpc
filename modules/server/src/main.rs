@@ -18,6 +18,13 @@ mod cameras;
 mod commands;
 mod config;
 
+/// the server process for running the geometeric and scale validation
+/// processes and reporting to the client.
+///
+/// the server provides some additional tools retrieving information about
+/// the server itself and the cameras that it has knowledge of. additional
+/// logging information is also available for the server to output if desired
+/// to assist with debugging and testing.
 #[derive(Debug, Parser)]
 struct CliArgs {
     /// config file to use command execution and additional configuration
@@ -33,14 +40,20 @@ struct CliArgs {
 
 #[derive(Clone)]
 struct RpcServer {
+    // the remote address of the connected peer
     peer_addr: SocketAddr,
+    // current state of the server
     state: Arc<ServerState>,
 }
 
 #[derive(Debug)]
 struct ServerState {
+    // hostname of the current device,
     hostname: String,
+    // execution information the server to use and provide to processes if
+    // needed
     exec: config::ExecConfig,
+    // the list of known cameras and their associated config information
     known_cameras: cameras::KnownCameras,
 }
 
@@ -104,6 +117,12 @@ async fn main() -> anyhow::Result<()> {
 }
 
 impl ServerState {
+    /// creates the current server state and retrieves the known cameras of
+    /// the device
+    ///
+    /// a validation check is made for the cameras once retrieved to ensure
+    /// that there are enough cameras for stereopsis if specified as being
+    /// enabled for this device
     fn new(exec: config::ExecConfig) -> anyhow::Result<Arc<Self>> {
         let hostname = hostname::get()
             .context("failed retrieving server hostname")?
@@ -199,6 +218,8 @@ impl Rpc for RpcServer {
         _ctx: context::Context,
         opts: CheckOpts,
     ) -> Result<(CompareResults, Option<StereopsisResults>), CheckError> {
+        // write the stl to a tmp file for use so the programs can load it
+        // as needed
         let stl_path = write_tmp_stl(&opts.stl).await.map_err(|err| {
             tracing::error!("failed to create tmp stl file: {err:#?}");
 
@@ -214,6 +235,7 @@ impl Rpc for RpcServer {
         )
         .await;
 
+        // attempt to remove the stl file
         if let Err(err) = tokio::fs::remove_file(&stl_path).await {
             tracing::error!("failed to remove tmp stl file: {err:#?}");
         }
@@ -227,6 +249,8 @@ impl Rpc for RpcServer {
     }
 }
 
+/// writes the provided bytes to a temporary file and returns the path that the
+/// file was written to
 async fn write_tmp_stl(data: &[u8]) -> anyhow::Result<PathBuf> {
     let path = get_tmp_file()?;
 
@@ -237,6 +261,7 @@ async fn write_tmp_stl(data: &[u8]) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+/// attempts to retrieve the current system time based on UNIX_EPOCH
 fn get_time() -> anyhow::Result<u64> {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -244,6 +269,8 @@ fn get_time() -> anyhow::Result<u64> {
         .context("check clock settings as system time is before UNIX_EPOCH")
 }
 
+/// creates a temporary filename based on a unix time stamp and count if the
+/// timestamp already exists
 fn get_tmp_file() -> anyhow::Result<PathBuf> {
     let time = get_time()?;
     let tmp_dir = PathBuf::from("/tmp");
@@ -264,12 +291,19 @@ fn get_tmp_file() -> anyhow::Result<PathBuf> {
     }
 }
 
+/// attempts to run the the build-background process
 async fn run_start(exec: &config::ExecConfig) -> Result<BackgroundResults, StartError> {
     tracing::info!("running background-builder");
 
     commands::run_background_builder(exec).await
 }
 
+/// attempts to run the stl-render, geometric, and stereopsis processes for
+/// given stl file
+///
+/// can optionally provide the desired layer at which to check.
+///
+/// if the geometric validation fails then stereopsis will not be executed
 async fn run_check<P>(
     exec: &config::ExecConfig,
     cameras: &cameras::KnownCameras,
@@ -301,4 +335,5 @@ where
     Ok((compare_check, stereopsis_check))
 }
 
+/// runs any cleanup work needed when a print finishes
 async fn run_finish() {}

@@ -1,3 +1,6 @@
+//! contains structs for handling camera config information and checking if the
+//! cameras are available
+
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -10,12 +13,17 @@ use anyhow::Context;
 use serde::Deserialize;
 use tracing::instrument;
 
+/// configuration information for a single camera
+///
+/// 3 keys are required for the server and all other config information is
+/// loaded into the `keys` value
 #[derive(Debug, Deserialize)]
 pub struct CameraConfig {
     pub serial: String,
     pub position: CameraPosition,
     pub full_frame_output_dir: PathBuf,
 
+    // all other unknown keys will be loaded into this hashmap
     #[serde(flatten)]
     pub keys: HashMap<String, serde_json::Value>,
 }

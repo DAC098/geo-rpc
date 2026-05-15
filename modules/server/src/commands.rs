@@ -1,3 +1,5 @@
+//! a set of commands for handling stl-render, geometric, stereopsis processes
+
 use std::{
     ffi::OsStr,
     path::PathBuf,
@@ -18,6 +20,8 @@ use tracing::instrument;
 use crate::cameras::{CameraPosition, KnownCameras};
 use crate::config::{ExecConfig, PythonExec};
 
+/// outputs the set of arguments for the given command if the level "trace" is
+/// enabled
 fn trace_arguments(cmd: &Command) {
     if tracing::enabled!(tracing::Level::TRACE) {
         let args: Vec<&OsStr> = cmd.as_std().get_args().collect();
@@ -26,6 +30,7 @@ fn trace_arguments(cmd: &Command) {
     }
 }
 
+/// runs the stl-render process and handles its output
 #[instrument(level = "trace", skip_all)]
 pub async fn run_stl_render<P>(
     exec: &ExecConfig,
@@ -68,6 +73,7 @@ where
     }
 }
 
+/// creates the stl-render command
 #[instrument(level = "trace", skip_all)]
 fn spawn_stl_render<CP, SP>(
     exec: &PythonExec,
@@ -117,6 +123,7 @@ where
     cmd.spawn().context("spawn failed")
 }
 
+/// runs the geometric validation process and handles its output
 #[instrument(level = "trace", skip_all)]
 pub async fn run_compare(
     exec: &ExecConfig,
@@ -195,6 +202,7 @@ pub async fn run_compare(
     Err(CheckError::Validator)
 }
 
+/// creates the geometric validation command
 #[instrument(level = "trace", skip_all)]
 fn spawn_compare<P>(
     cmd: &str,
@@ -227,11 +235,14 @@ where
     cmd.spawn().context("spawn failed")
 }
 
+/// json struct created by the stereopsis process
 #[derive(Debug, Deserialize)]
 pub struct StereopsisJson {
+    /// overall result of the stereopsis process
     overall_passed: bool,
 }
 
+/// runs the stereopsis validation process and handles its output
 #[instrument(level = "trace", skip_all)]
 pub async fn run_stereopsis(
     cameras: &KnownCameras,
@@ -297,6 +308,7 @@ pub async fn run_stereopsis(
     }))
 }
 
+/// creates the stereopsis validation command
 #[instrument(level = "trace", skip_all)]
 fn spawn_stereopsis<P>(
     cameras: &KnownCameras,
@@ -322,6 +334,8 @@ where
     }
 
     for (key, info) in cameras {
+        // will assume that this has been checked before hand that we will have
+        // the left and right cameras specified
         match info.position {
             CameraPosition::Left => {
                 tracing::trace!("adding left camera: {key}");
@@ -369,6 +383,7 @@ where
     cmd.spawn().context("spawn failed")
 }
 
+/// runs the build-background process and handles its output
 #[instrument(level = "trace", skip_all)]
 pub async fn run_background_builder(exec: &ExecConfig) -> Result<BackgroundResults, StartError> {
     let start = Instant::now();
@@ -407,6 +422,7 @@ pub async fn run_background_builder(exec: &ExecConfig) -> Result<BackgroundResul
     Ok(BackgroundResults { exec_time })
 }
 
+/// creates the build-background command
 #[instrument(level = "trace", skip_all)]
 fn spawn_background_builder<P>(exec: &str, cameras_path: P) -> anyhow::Result<tokio::process::Child>
 where

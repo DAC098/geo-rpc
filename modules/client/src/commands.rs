@@ -1,3 +1,5 @@
+//! provides wrapper functions for handling requests that can be moade for a
+//! list RPC servers
 use std::{
     fmt::Write,
     iter::IntoIterator,
@@ -12,6 +14,7 @@ use tarpc::context;
 
 use crate::node::Client;
 
+/// sends a health request to each RPC server and prints the response
 pub async fn request_health<'a, I>(iter: I) -> anyhow::Result<()>
 where
     I: IntoIterator<Item = &'a Client>,
@@ -29,6 +32,10 @@ where
     Ok(())
 }
 
+/// prints the prefetched RPC server information
+///
+/// it will print the hostname of the RPC server and any available cameras for
+/// the server
 pub async fn request_info<'a, I>(iter: I) -> anyhow::Result<()>
 where
     I: IntoIterator<Item = &'a Client>,
@@ -62,6 +69,7 @@ where
     Ok(())
 }
 
+/// sends a start request to each RPC server and prints the result
 pub async fn request_start<'a, I>(iter: I) -> anyhow::Result<()>
 where
     I: IntoIterator<Item = &'a Client>,
@@ -115,14 +123,21 @@ where
     Ok(())
 }
 
+/// the list of options that can be sent to the RPC server for a check request
 pub struct CheckOptions {
+    /// the layer height to use
     pub height: Option<f32>,
+    /// the layer number to use
     pub number: Option<u32>,
+    /// the with of the part
     pub dim_width: f32,
+    /// the height of the part
     pub dim_height: f32,
+    /// the STL to send to the server
     pub stl: PathBuf,
 }
 
+/// send a check request to each RPC server and prints the result
 pub async fn request_check<'a, I>(
     iter: I,
     CheckOptions {
@@ -227,6 +242,7 @@ where
     Ok(())
 }
 
+/// sends a finish request to each RPC server
 pub async fn request_finish<'a, I>(iter: I) -> anyhow::Result<()>
 where
     I: IntoIterator<Item = &'a Client>,

@@ -100,6 +100,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// runs the provide cmd against on the nodes in the client list
 async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
     match cmd {
         Cmd::Health => commands::request_health(clients).await,
@@ -178,6 +179,7 @@ async fn run_cmd(clients: &[node::Client], cmd: Cmd) -> anyhow::Result<()> {
     }
 }
 
+/// reads a single line from stdin and provides a prefix output
 fn get_input(prefix: &str) -> std::io::Result<String> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
@@ -192,6 +194,7 @@ fn get_input(prefix: &str) -> std::io::Result<String> {
     Ok(buf)
 }
 
+/// prompts the user for a yes no answer that will default to yes if empty
 fn query_continue() -> anyhow::Result<bool> {
     for _ in 0..3 {
         let input = get_input("continue? [y/n] ").context("failed requesting continue")?;

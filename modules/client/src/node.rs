@@ -1,3 +1,5 @@
+//! provides a single utilities for managing rpc clients
+
 use std::{
     net::{IpAddr, SocketAddr},
     path::Path,
@@ -8,12 +10,17 @@ use anyhow::{Context, bail};
 use com::{DEFAULT_PORT, RpcClient};
 use tarpc::{client, context, tokio_serde::formats::Json};
 
+/// a wrapper struct for an RPC client
 pub struct Client {
+    /// the address for the remote RPC server
     pub addr: SocketAddr,
+    /// the prefetched remote information for the RPC server
     pub info: Option<com::Info>,
+    /// the actual client for the RPC server
     pub channel: RpcClient,
 }
 
+/// parses a node file that contains a list of RPC servers
 async fn parse_file<P>(path: P) -> anyhow::Result<Vec<SocketAddr>>
 where
     P: AsRef<Path>,
@@ -55,6 +62,7 @@ where
 }
 
 impl Client {
+    /// creates a list of clients for the provided nodes file
     pub async fn load_file<P>(path: P) -> anyhow::Result<Vec<Self>>
     where
         P: AsRef<Path>,
@@ -64,6 +72,7 @@ impl Client {
         Self::load_many(nodes).await
     }
 
+    /// creates a list of clients from the provided list of socket addrs
     pub async fn load_many(addrs: Vec<SocketAddr>) -> anyhow::Result<Vec<Self>> {
         let mut rtn = Vec::with_capacity(addrs.len());
 
@@ -74,6 +83,7 @@ impl Client {
         Ok(rtn)
     }
 
+    /// creates a single client from the provided socket addr
     pub async fn load(addr: SocketAddr) -> anyhow::Result<Self> {
         let mut transport = tarpc::serde_transport::tcp::connect(addr, Json::default);
         transport.config_mut().max_frame_length(usize::MAX);
@@ -98,6 +108,7 @@ impl Client {
         })
     }
 
+    /// retrieves the name of the RPC server
     pub fn get_name(&self) -> String {
         if let Some(info) = &self.info {
             format!("{}[{}]", info.hostname, self.addr)

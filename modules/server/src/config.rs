@@ -1,3 +1,5 @@
+//! provides structs for loading the config file for the server
+
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -6,35 +8,55 @@ use std::{
 use anyhow::Context;
 use serde::Deserialize;
 
+/// the top level server config struct
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
+    /// an optional specified socket address to listen on
     pub listen: Option<SocketAddr>,
+    /// config information for running necessary processes for
+    /// print validation
     pub exec: ExecConfig,
 }
 
+/// provides information for executing the necessary process for print
+/// validation
 #[derive(Debug, Deserialize)]
 pub struct ExecConfig {
+    /// the path for the json containing camera config information
     pub cameras: PathBuf,
+    /// the executable to use for build-background
     pub background: String,
+    /// the python script to use for stl-rendering
     pub stl_render: PythonExec,
+    /// the executable to use for geometric validation
     pub validator: String,
+    /// the optional python script to use for stl-rendering
     pub stereopsis: Option<PythonExec>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PythonExec {
+    /// the python binary to for executing the script
     pub binary: String,
+    /// the python script to use
     pub script: String,
+    /// any addtional static argumets to apply
     pub args: Vec<StaticArg>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StaticArg {
+    /// the argument to add
     pub flag: String,
+    /// the optiona value for the argument
     pub value: Option<String>,
 }
 
 impl ServerConfig {
+    /// the config file to load if specified
+    ///
+    /// will default to the current working directories `config.toml` or
+    /// `config.ignore.toml` if they exist
     pub fn get_path(path: Option<PathBuf>) -> anyhow::Result<Option<PathBuf>> {
         if let Some(path) = path {
             Ok(Some(path))
@@ -55,6 +77,7 @@ impl ServerConfig {
         }
     }
 
+    /// attempts to load the specified toml file
     pub async fn load<P>(path: P) -> anyhow::Result<Self>
     where
         P: AsRef<Path>,
